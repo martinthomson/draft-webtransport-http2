@@ -5,7 +5,7 @@
 webtrans                                                     A. Frindell
 Internet-Draft                                             Facebook Inc.
 Intended status: Standards Track                              E. Kinnear
-Expires: 6 October 2023                                         T. Pauly
+Expires: 1 November 2024                                        T. Pauly
                                                               Apple Inc.
                                                               M. Thomson
                                                                  Mozilla
@@ -13,7 +13,7 @@ Expires: 6 October 2023                                         T. Pauly
                                                                   Google
                                                                   G. Xie
                                                            Facebook Inc.
-                                                            4 April 2023
+                                                           30 April 2024
 
 
                         WebTransport over HTTP/2
@@ -54,11 +54,11 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 6 October 2023.
+   This Internet-Draft will expire on 1 November 2024.
 
 Copyright Notice
 
-   Copyright (c) 2023 IETF Trust and the persons identified as the
+   Copyright (c) 2024 IETF Trust and the persons identified as the
    document authors.  All rights reserved.
 
    This document is subject to BCP 78 and the IETF Trust's Legal
@@ -82,7 +82,8 @@ Table of Contents
      3.4.  Flow Control
        3.4.1.  Limiting the Number of Simultaneous Sessions
        3.4.2.  Limiting the Number of Streams Within a Session
-       3.4.3.  Flow Control and Intermediaries
+       3.4.3.  Initial Flow Control Limits
+       3.4.4.  Flow Control and Intermediaries
    4.  WebTransport Features
      4.1.  Transport Properties
      4.2.  WebTransport Streams
@@ -98,17 +99,18 @@ Table of Contents
      5.9.  WT_STREAM_DATA_BLOCKED Capsule
      5.10. WT_STREAMS_BLOCKED Capsule
      5.11. DATAGRAM Capsule
+     5.12. CLOSE_WEBTRANSPORT_SESSION Capsule
+     5.13. DRAIN_WEBTRANSPORT_SESSION Capsule
    6.  Examples
-   7.  WebTransport Header Fields
-   8.  Session Termination
-   9.  Security Considerations
-   10. IANA Considerations
-     10.1.  HTTP/2 SETTINGS Parameter Registration
-     10.2.  Capsule Types
-     10.3.  HTTP Header Field Name
-   11. References
-     11.1.  Normative References
-     11.2.  Informative References
+   7.  Session Termination
+   8.  Security Considerations
+   9.  IANA Considerations
+     9.1.  HTTP/2 SETTINGS Parameter Registration
+     9.2.  Capsule Types
+     9.3.  HTTP Header Field Name
+   10. References
+     10.1.  Normative References
+     10.2.  Informative References
    Acknowledgments
    Index
    Authors' Addresses
@@ -293,16 +295,36 @@ Table of Contents
 
 3.4.1.  Limiting the Number of Simultaneous Sessions
 
-   This document defines a SETTINGS_MAX_WEBTRANSPORT_SESSIONS parameter
+   This document defines a SETTINGS_WEBTRANSPORT_MAX_SESSIONS parameter
    that allows the server to limit the maximum number of concurrent
-   WebTransport sessions on a single HTTP/3 connection.  The client MUST
+   WebTransport sessions on a single HTTP/2 connection.  The client MUST
    NOT open more sessions than indicated in the server SETTINGS
    parameters.  The server MUST NOT close the connection if the client
    opens sessions exceeding this limit, as the client and the server do
    not have a consistent view of how many sessions are open due to the
-   asynchronous nature of the protocol; instead, it MUST reply to the
-   CONNECT request with a status code 426, indicating that the client
-   attempted to open too many sessions.
+   asynchronous nature of the protocol; instead, it MUST reset all of
+   the CONNECT streams it is not willing to process with the
+   REFUSED_STREAM error code (Section 8.7 of [HTTP2]).
+
+   Just like other HTTP requests, WebTransport sessions, and data sent
+   on those sessions, are counted against flow control limits.  Servers
+   that wish to limit the rate of incoming requests on any particular
+   session have multiple mechanisms:
+
+   *  The REFUSED_STREAM error code defined in Section 8.7 of [HTTP2]
+      indicates to the receiving HTTP/2 stack that the request was not
+      processed in any way.
+
+   *  HTTP status code 429 indicates that the request was rejected due
+      to rate limiting [RFC6585].  Unlike the previous method, this
+      signal is directly propagated to the application.
+
+   An endpoint that wishes to reduce the value of
+   SETTINGS_WEBTRANSPORT_MAX_SESSIONS to a value that is below the
+   current number of open sessions can either close sessions that exceed
+   the new value or allow those sessions to complete.  Endpoints MUST
+   NOT reduce the value of SETTINGS_WEBTRANSPORT_MAX_SESSIONS to "0"
+   after previously advertising a non-zero value.
 
 3.4.2.  Limiting the Number of Streams Within a Session
 
@@ -316,7 +338,62 @@ Table of Contents
    limit is the only mechanism for an endpoint to limit the number of
    WebTransport streams that its peer can open on a session.
 
-3.4.3.  Flow Control and Intermediaries
+3.4.3.  Initial Flow Control Limits
+
+   To allow stream data to be exchanged in the same flight as the
+   extended CONNECT request that establishes a WebTransport session,
+   initial flow control limits can be exchanged via HTTP/2 SETTINGS
+   (Section 3.4.3.1).  Initial values for the flow control limits can
+   also be exchanged via the WebTransport-Init header field on the
+   extended CONNECT request (Section 3.4.3.2).
+
+   The limits communicated via HTTP/2 SETTINGS apply to all WebTransport
+   sessions opened on that HTTP/2 connection.  Limits communicated via
+   the WebTransport-Init header field apply only to the WebTransport
+   session established by the extended CONNECT request carrying that
+   field.
+
+   If both the SETTINGS and the header field are present when a
+   WebTransport session is established, the endpoint MUST use the
+   greater of the two values for each corresponding initial flow control
+   value.  Endpoints sending the SETTINGS and also including the header
+   field SHOULD ensure that the header field values are greater than or
+   equal to the values provided in the SETTINGS.
+
+3.4.3.1.  Flow Control SETTINGS
+
+   Initial flow control limits can be exchanged via HTTP/2 SETTINGS
+   (Section 9.1) by providing non-zero values for
+
+   *  WT_MAX_DATA via SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA
+
+   *  WT_MAX_STREAM_DATA via
+      SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI and
+      SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI
+
+   *  WT_MAX_STREAMS via SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI
+      and SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI
+
+3.4.3.2.  Flow Control Header Field
+
+   The WebTransport-Init HTTP header field can be used to communicate
+   the initial values of the flow control windows, similar to how QUIC
+   uses transport parameters.  The WebTransport-Init is a Dictionary
+   Structured Field (Section 3.2 of [RFC8941]).  If any of the fields
+   cannot be parsed correctly or do not have the correct type, the peer
+   MUST reset the CONNECT stream.  The following keys are defined for
+   the WebTransport-Init header field:
+
+   u:  The initial flow control limit for unidirectional streams opened
+      by the recipient of this header field.  MUST be an Integer.
+
+   bl:  The initial flow control limit for the bidirectional streams
+      opened by the sender of this header field.  MUST be an Integer.
+
+   br:  The initial flow control limit for the bidirectional streams
+      opened by the recipient of this header field.  MUST be an Integer.
+
+3.4.4.  Flow Control and Intermediaries
 
    WebTransport over HTTP/2 uses several capsules for flow control, and
    all of these capsules define special intermediary handling as
@@ -335,7 +412,7 @@ Table of Contents
    that data cannot be immediately forwarded to the next hop.
 
    In practice, an intermediary that translates flow control signals
-   between simlar WebTransport protocols, such as between two HTTP/2
+   between similar WebTransport protocols, such as between two HTTP/2
    connections, can often simply reexpress the same limits received on
    one connection directly on the other connection.
 
@@ -462,14 +539,25 @@ Table of Contents
 
    After sending a WT_RESET_STREAM capsule, an endpoint ceases
    transmission of WT_STREAM capsules on the identified stream.  A
-   receiver of a WT_RESET_STREAM capsule can discard any data that it
-   already received on that stream.
+   receiver of a WT_RESET_STREAM capsule can discard any data in excess
+   of the Reliable Size indicated, even if that data was already
+   received.
+
+   The WT_RESET_STREAM capsule follows the design of the QUIC
+   RESET_STREAM_AT frame [PARTIAL-RESET].  Consequently, it includes a
+   Reliable Size field.  A WT_RESET_STREAM capsule MUST be sent after
+   WT_STREAM capsules that include an amount of data equal to or in
+   excess of the value in the Reliable Size field.  A receiver MUST
+   treat the receipt of a WT_RESET_STREAM with a Reliable Size smaller
+   than the number of bytes it has received on the stream as a session
+   error.
 
    WT_RESET_STREAM Capsule {
      Type (i) = 0x190B4D39,
      Length (i),
      Stream ID (i),
      Application Protocol Error Code (i),
+     Reliable Size (i),
    }
 
                   Figure 2: WT_RESET_STREAM Capsule Format
@@ -482,6 +570,10 @@ Table of Contents
    Application Protocol Error Code:  A variable-length integer
       containing the application protocol error code that indicates why
       the stream is being closed.
+
+   Reliable Size:  A variable-length integer indicating the amount of
+      data that needs to be delivered to the application even though the
+      stream is reset.
 
    Unlike the equivalent QUIC frame, this capsule does not include a
    Final Size field.  In-order delivery of WT_STREAM capsules ensures
@@ -570,7 +662,10 @@ Table of Contents
    described in Section 3.2 of [HTTP-DATAGRAM].  Intermedaries MUST
    consume WT_MAX_DATA capsules for flow control purposes and MUST
    generate and send appropriate flow control signals for their limits;
-   see Section 3.4.3.
+   see Section 3.4.4.
+
+   The initial value for this limit MAY be communicated by sending a
+   non-zero value for SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA.
 
 5.6.  WT_MAX_STREAM_DATA Capsule
 
@@ -605,7 +700,12 @@ Table of Contents
    as described in Section 3.2 of [HTTP-DATAGRAM].  Intermedaries MUST
    consume WT_MAX_STREAM_DATA capsules for flow control purposes and
    MUST generate and send appropriate flow control signals for their
-   limits; see Section 3.4.3.
+   limits; see Section 3.4.4.
+
+   Initial values for this limit for unidirectional and bidirectional
+   streams MAY be communicated by sending non-zero values for
+   SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI and
+   SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI respectively.
 
 5.7.  WT_MAX_STREAMS Capsule
 
@@ -614,6 +714,11 @@ Table of Contents
    type it is permitted to open.  A WT_MAX_STREAMS capsule with a type
    of 0x190B4D3F applies to bidirectional streams, and a WT_MAX_STREAMS
    capsule with a type of 0x190B4D40 applies to unidirectional streams.
+
+   Note that, because Maximum Streams is a cumulative value representing
+   the total allowed number of streams, including previously closed
+   streams, endpoints repeatedly send new WT_MAX_STREAMS capsules with
+   increasing Maximum Streams values as streams are opened.
 
    WT_MAX_STREAMS Capsule {
      Type (i) = 0x190B4D3F..0x190B4D40,
@@ -643,6 +748,10 @@ Table of Contents
    consume WT_MAX_STREAMS capsules for flow control purposes and MUST
    generate and send appropriate flow control signals for their limits.
 
+   Initial values for these limits MAY be communicated by sending non-
+   zero values for SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI and
+   SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI.
+
 5.8.  WT_DATA_BLOCKED Capsule
 
    A sender SHOULD send a WT_DATA_BLOCKED capsule (type=0x190B4D41) when
@@ -667,7 +776,7 @@ Table of Contents
    described in Section 3.2 of [HTTP-DATAGRAM].  Intermedaries MUST
    consume WT_DATA_BLOCKED capsules for flow control purposes and MUST
    generate and send appropriate flow control signals for their limits;
-   see Section 3.4.3.
+   see Section 3.4.4.
 
 5.9.  WT_STREAM_DATA_BLOCKED Capsule
 
@@ -697,7 +806,7 @@ Table of Contents
    handling, as described in Section 3.2 of [HTTP-DATAGRAM].
    Intermedaries MUST consume WT_STREAM_DATA_BLOCKED capsules for flow
    control purposes and MUST generate and send appropriate flow control
-   signals for their limits; see Section 3.4.3.
+   signals for their limits; see Section 3.4.4.
 
 5.10.  WT_STREAMS_BLOCKED Capsule
 
@@ -773,6 +882,68 @@ Table of Contents
    [WEBTRANSPORT-H3], intermediaries follow the requirements in
    [WEBTRANSPORT-H3] to use native QUIC datagrams.
 
+5.12.  CLOSE_WEBTRANSPORT_SESSION Capsule
+
+   WebTransport over HTTP/2 uses the CLOSE_WEBTRANSPORT_SESSION capsule
+   defined in Section 5 of [WEBTRANSPORT-H3] to terminate a WebTransport
+   session with an application error code and message.
+
+   WebTransport sessions can be terminated by optionally sending a
+   CLOSE_WEBTRANSPORT_SESSION capsule and then by closing the HTTP/2
+   stream associated with the session (see Section 7).
+
+   CLOSE_WEBTRANSPORT_SESSION Capsule {
+     Type (i) = CLOSE_WEBTRANSPORT_SESSION,
+     Length (i),
+     Application Error Code (32),
+     Application Error Message (..8192),
+   }
+
+            Figure 12: CLOSE_WEBTRANSPORT_SESSION Capsule Format
+
+   When used in WebTransport over HTTP/2, CLOSE_WEBTRANSPORT_SESSION
+   capsules contain the following fields:
+
+   Application Error Code:  A 32-bit error code provided by the
+      application closing the connection.
+
+   Application Error Message:  A UTF-8 encoded error message string
+      provided by the application closing the connection.  The message
+      takes up the remainder of the capsule, and its length MUST NOT
+      exceed 1024 bytes.
+
+   An endpoint that sends a CLOSE_WEBTRANSPORT_SESSION capsule MUST then
+   close the stream.  The recipient MUST close the stream upon receipt
+   of the capsule.
+
+   Cleanly terminating a WebTransport session without a
+   CLOSE_WEBTRANSPORT_SESSION capsule is semantically equivalent to
+   terminating it with a CLOSE_WEBTRANSPORT_SESSION capsule that has an
+   error code of 0 and an empty error string.
+
+5.13.  DRAIN_WEBTRANSPORT_SESSION Capsule
+
+   HTTP/2 uses GOAWAY frames (Section 6.8 of [HTTP2]) to allow an
+   endpoint to gracefully stop accepting new streams while still
+   finishing processing of previously established streams.
+
+   WebTransport over HTTP/2 uses the DRAIN_WEBTRANSPORT_SESSION capsule
+   defined in Section 4.6 of [WEBTRANSPORT-H3] to gracefully shut down a
+   WebTransport session.
+
+   DRAIN_WEBTRANSPORT_SESSION Capsule {
+     Type (i) = DRAIN_WEBTRANSPORT_SESSION,
+     Length (i) = 0
+   }
+
+            Figure 13: DRAIN_WEBTRANSPORT_SESSION Capsule Format
+
+   After sending or receiving either a DRAIN_WEBTRANSPORT_SESSION
+   capsule or HTTP/2 GOAWAY frame, an endpoint MAY continue using the
+   session and MAY open new WebTransport streams.  The signal is
+   intended for the application using WebTransport, which is expected to
+   attempt to gracefully terminate the session as soon as possible.
+
 6.  Examples
 
    An example of negotiating a WebTransport Stream on an HTTP/2
@@ -788,8 +959,7 @@ SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 1
 
                                     SETTINGS
                                     SETTINGS_ENABLE_CONNECT_PROTOCOL = 1
-                                    SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 3
-                                    SETTINGS_MAX_WEBTRANSPORT_SESSIONS = 100
+                                    SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 100
 
 HEADERS + END_HEADERS
 Stream ID = 3
@@ -805,15 +975,15 @@ origin: server.example.com
                                     :status = 200
 
 WT_STREAM
-Stream ID = 5
+Stream ID = 0
 WebTransport Data
 
                                     WT_STREAM + FIN
-                                    Stream ID = 5
+                                    Stream ID = 0
                                     WebTransport Data
 
 WT_STREAM + FIN
-Stream ID = 5
+Stream ID = 0
 WebTransport Data
 
    An example of the server initiating a WebTransport Stream follows.
@@ -828,8 +998,7 @@ SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 1
 
                                     SETTINGS
                                     SETTINGS_ENABLE_CONNECT_PROTOCOL = 1
-                                    SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 3
-                                    SETTINGS_MAX_WEBTRANSPORT_SESSIONS = 100
+                                    SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 100
 
 HEADERS + END_HEADERS
 Stream ID = 3
@@ -844,37 +1013,18 @@ origin: server.example.com
                                     :status = 200
 
                                     WT_STREAM
-                                    Stream ID = 2
+                                    Stream ID = 1
                                     WebTransport Data
 
 WT_STREAM + FIN
-Stream ID = 2
+Stream ID = 1
 WebTransport Data
 
                                     WT_STREAM + FIN
-                                    Stream ID = 2
+                                    Stream ID = 1
                                     WebTransport Data
 
-7.  WebTransport Header Fields
-
-   WebTransport over HTTP/2 uses the WebTransport-Init HTTP header field
-   to communicate the initial values of the flow control windows,
-   similar to how QUIC uses transport parameters.  The WebTransport-Init
-   is a Dictionary Structured Field (Section 3.2 of [RFC8941]).  If any
-   of the fields cannot be parsed correctly or do not have the correct
-   type, the peer MUST reset the CONNECT stream.  The following keys are
-   defined for the WebTransport-Init header field:
-
-   u:  The initial flow control limit for unidirectional streams opened
-      by the recipient of this header field.  MUST be an Integer.
-
-   bl:  The initial flow control limit for the bidirectional streams
-      opened by the sender of this header field.  MUST be an Integer.
-
-   br:  The initial flow control limit for the bidirectional streams
-      opened by the recipient of this header field.  MUST be an Integer.
-
-8.  Session Termination
+7.  Session Termination
 
    An WebTransport session over HTTP/2 is terminated when either
    endpoint closes the stream associated with the CONNECT request that
@@ -882,7 +1032,12 @@ WebTransport Data
    terminated, the endpoint MUST stop sending new datagrams and reset
    all of the streams associated with the session.
 
-9.  Security Considerations
+   Prior to closing the stream associated with the CONNECT request,
+   either endpoint can send a CLOSE_WEBTRANSPORT_SESSION capsule with an
+   application error code and message to convey additional information
+   about the reasons for the closure of the session.
+
+8.  Security Considerations
 
    WebTransport over HTTP/2 satisfies all of the security requirements
    imposed by [OVERVIEW] on WebTransport protocols, thus providing a
@@ -908,29 +1063,130 @@ WebTransport Data
    within connection gets a reasonable share of controlled resources;
    this applies both to sending data and to opening new streams.
 
-10.  IANA Considerations
+9.  IANA Considerations
 
-10.1.  HTTP/2 SETTINGS Parameter Registration
+9.1.  HTTP/2 SETTINGS Parameter Registration
 
-   The following entry is added to the "HTTP/2 Settings" registry
+   The following entries are added to the "HTTP/2 Settings" registry
    established by [RFC7540]:
 
    The SETTINGS_WEBTRANSPORT_MAX_SESSIONS parameter indicates that the
    specified HTTP/2 connection is WebTransport-capable and the number of
    concurrent sessions an endpoint is willing to receive.  The default
-   value for the SETTINGS_MAX_WEBTRANSPORT_SESSIONS parameter is "0",
+   value for the SETTINGS_WEBTRANSPORT_MAX_SESSIONS parameter is "0",
    meaning that the endpoint is not willing to receive any WebTransport
    sessions.
 
    Setting Name:  WEBTRANSPORT_MAX_SESSIONS
 
-   Value:  0x2b603743
+   Value:  0x2b60
 
    Default:  0
 
    Specification:  This document
 
-10.2.  Capsule Types
+   The SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA parameter indicates the
+   initial value for the session data limit, otherwise communicated by
+   the WT_MAX_DATA capsule (see Section 5.5).  The default value for the
+   SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA parameter is "0", indicating
+   that the endpoint needs to send a WT_MAX_DATA capsule within each
+   session before its peer is allowed to send any stream data within
+   that session.
+
+   Note that this limit applies to all WebTransport sessions that use
+   the HTTP/2 connection on which this SETTING is sent.
+
+   Setting Name:  SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA
+
+   Value:  0x2b61
+
+   Default:  0
+
+   Specification:  This document
+
+   The SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI parameter
+   indicates the initial value for the stream data limit for incoming
+   unidirectional streams, otherwise communicated by the
+   WT_MAX_STREAM_DATA capsule (see Section 5.6).  The default value for
+   the SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI parameter is
+   "0", indicating that the endpoint needs to send WT_MAX_STREAM_DATA
+   capsules for each stream within each individual WebTransport session
+   before its peer is allowed to send any stream data on those streams.
+
+   Note that this limit applies to all WebTransport streams on all
+   sessions that use the HTTP/2 connection on which this SETTING is
+   sent.
+
+   Setting Name:  SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI
+
+   Value:  0x2b62
+
+   Default:  0
+
+   Specification:  This document
+
+   The SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI parameter
+   indicates the initial value for the stream data limit for incoming
+   data on bidirectional streams, otherwise communicated by the
+   WT_MAX_STREAM_DATA capsule (see Section 5.6).  The default value for
+   the SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI parameter is
+   "0", indicating that the endpoint needs to send WT_MAX_STREAM_DATA
+   capsules for each stream within each individual WebTransport session
+   before its peer is allowed to send any stream data on those streams.
+
+   Note that this limit applies to all WebTransport streams on all
+   sessions that use the HTTP/2 connection on which this SETTING is
+   sent.
+
+   Setting Name:  SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI
+
+   Value:  0x2b63
+
+   Default:  0
+
+   Specification:  This document
+
+   The SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI parameter indicates
+   the initial value for the unidirectional max stream limit, otherwise
+   communicated by the WT_MAX_STREAMS capsule (see Section 5.7).  The
+   default value for the SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI
+   parameter is "0", indicating that the endpoint needs to send
+   WT_MAX_STREAMS capsules on each individual WebTransport session
+   before its peer is allowed to create any unidirectional streams
+   within that session.
+
+   Note that this limit applies to all WebTransport sessions that use
+   the HTTP/2 connection on which this SETTING is sent.
+
+   Setting Name:  SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI
+
+   Value:  0x2b64
+
+   Default:  0
+
+   Specification:  This document
+
+   The SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI parameter
+   indicates the initial value for the bidirectional max stream limit,
+   otherwise communicated by the WT_MAX_STREAMS capsule (see
+   Section 5.7).  The default value for the
+   SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI parameter is "0",
+   indicating that the endpoint needs to send WT_MAX_STREAMS capsules on
+   each individual WebTransport session before its peer is allowed to
+   create any bidirectional streams within that session.
+
+   Note that this limit applies to all WebTransport sessions that use
+   the HTTP/2 connection on which this SETTING is sent.
+
+   Setting Name:  SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI
+
+   Value:  0x2b65
+
+   Default:  0
+
+   Specification:  This document
+
+9.2.  Capsule Types
 
    The following entries are added to the "HTTP Capsule Types" registry
    established by [HTTP-DATAGRAM]:
@@ -1045,7 +1301,7 @@ WebTransport Data
       (mailto:webtransport@ietf.org)
    Notes:  None
 
-10.3.  HTTP Header Field Name
+9.3.  HTTP Header Field Name
 
    IANA will register the following entry in the "Hypertext Transfer
    Protocol (HTTP) Field Name Registry" maintained at
@@ -1062,9 +1318,9 @@ WebTransport Data
 
    Comments:  None
 
-11.  References
+10.  References
 
-11.1.  Normative References
+10.1.  Normative References
 
    [HTTP]     Fielding, R. T., Nottingham, M., and J. Reschke, "HTTP
               Semantics", Work in Progress, Internet-Draft, draft-ietf-
@@ -1087,14 +1343,24 @@ WebTransport Data
 
    [OVERVIEW] Vasiliev, V., "The WebTransport Protocol Framework", Work
               in Progress, Internet-Draft, draft-ietf-webtrans-overview-
-              05, 24 January 2023,
-              <https://datatracker.ietf.org/doc/html/draft-ietf-
-              webtrans-overview-05>.
+              07, 4 March 2024, <https://datatracker.ietf.org/doc/html/
+              draft-ietf-webtrans-overview-07>.
+
+   [PARTIAL-RESET]
+              Seemann, M. and K. Oku, "QUIC Stream Resets with Partial
+              Delivery", Work in Progress, Internet-Draft, draft-ietf-
+              quic-reliable-stream-reset-06, 28 February 2024,
+              <https://datatracker.ietf.org/doc/html/draft-ietf-quic-
+              reliable-stream-reset-06>.
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
               DOI 10.17487/RFC2119, March 1997,
               <https://www.rfc-editor.org/rfc/rfc2119>.
+
+   [RFC6585]  Nottingham, M. and R. Fielding, "Additional HTTP Status
+              Codes", RFC 6585, DOI 10.17487/RFC6585, April 2012,
+              <https://www.rfc-editor.org/rfc/rfc6585>.
 
    [RFC7230]  Fielding, R., Ed. and J. Reschke, Ed., "Hypertext Transfer
               Protocol (HTTP/1.1): Message Syntax and Routing",
@@ -1114,7 +1380,7 @@ WebTransport Data
               RFC 8441, DOI 10.17487/RFC8441, September 2018,
               <https://www.rfc-editor.org/rfc/rfc8441>.
 
-   [RFC8941]  Nottingham, M. and P-H. Kamp, "Structured Field Values for
+   [RFC8941]  Nottingham, M. and P. Kamp, "Structured Field Values for
               HTTP", RFC 8941, DOI 10.17487/RFC8941, February 2021,
               <https://www.rfc-editor.org/rfc/rfc8941>.
 
@@ -1142,11 +1408,11 @@ WebTransport Data
    [WEBTRANSPORT-H3]
               Frindell, A., Kinnear, E., and V. Vasiliev, "WebTransport
               over HTTP/3", Work in Progress, Internet-Draft, draft-
-              ietf-webtrans-http3-05, 13 March 2023,
+              ietf-webtrans-http3-09, 4 March 2024,
               <https://datatracker.ietf.org/doc/html/draft-ietf-
-              webtrans-http3-05>.
+              webtrans-http3-09>.
 
-11.2.  Informative References
+10.2.  Informative References
 
    [DATAGRAM] Pauly, T., Kinnear, E., and D. Schinazi, "An Unreliable
               Datagram Extension to QUIC", RFC 9221,
@@ -1175,58 +1441,72 @@ Acknowledgments
 
 Index
 
-   P W
+   P S W
 
       P
 
-         PADDING  Section 5.1, Paragraph 1; Section 5.1, Paragraph 1;
-            Section 5.1, Paragraph 2; Section 5.1, Paragraph 2;
-            Section 5.1, Paragraph 2; Section 10.2, Paragraph 3.4.1
+         PADDING  Section 5.1, Paragraph 1; Section 5.1, Paragraph 2;
+            Section 9.2, Paragraph 3.4.1
+
+      S
+
+         SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA  Section 3.4.3.1,
+            Paragraph 2.1.1; Section 5.5, Paragraph 7; Section 9.1,
+            Paragraph 4; Section 9.1, Paragraph 6.2.1
+         SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI  Section 3.4
+            .3.1, Paragraph 2.2.1; Section 5.6, Paragraph 7;
+            Section 9.1, Paragraph 10; Section 9.1, Paragraph 12.2.1
+         SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI  Section 3.4.
+            3.1, Paragraph 2.2.1; Section 5.6, Paragraph 7; Section 9.1,
+            Paragraph 7; Section 9.1, Paragraph 9.2.1
+         SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI  Section 3.4.3.1
+            , Paragraph 2.3.1; Section 5.7, Paragraph 9; Section 9.1,
+            Paragraph 16; Section 9.1, Paragraph 18.2.1
+         SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI  Section 3.4.3.1,
+            Paragraph 2.3.1; Section 5.7, Paragraph 9; Section 9.1,
+            Paragraph 13; Section 9.1, Paragraph 15.2.1
 
       W
 
-         WT_DATA_BLOCKED  Section 2, Paragraph 8; Section 3.4.3,
+         WT_DATA_BLOCKED  Section 2, Paragraph 8; Section 3.4.4,
             Paragraph 1; Section 5.8, Paragraph 1; Section 5.8,
-            Paragraph 1; Section 5.8, Paragraph 3; Section 5.8,
-            Paragraph 5; Section 5.8, Paragraph 5; Section 5.9,
-            Paragraph 1; Section 10.2, Paragraph 17.4.1
-         WT_MAX_DATA  Section 2, Paragraph 8; Section 3.4.3, Paragraph
-            1; Section 5.5, Paragraph 1; Section 5.5, Paragraph 3;
-            Section 5.5, Paragraph 6; Section 5.5, Paragraph 6;
-            Section 10.2, Paragraph 11.4.1
-         WT_MAX_STREAM_DATA  Section 2, Paragraph 8; Section 3.4.3,
-            Paragraph 1; Section 5.6, Paragraph 1; Section 5.6,
-            Paragraph 3; Section 5.6, Paragraph 6; Section 5.6,
-            Paragraph 6; Section 10.2, Paragraph 13.4.1
+            Paragraph 3; Section 5.8, Paragraph 5; Section 5.9,
+            Paragraph 1; Section 9.2, Paragraph 17.4.1
+         WT_MAX_DATA  Section 2, Paragraph 8; Section 3.4.3.1, Paragraph
+            2.1.1; Section 3.4.4, Paragraph 1; Section 5.5, Paragraph 1;
+            Section 5.5, Paragraph 3; Section 5.5, Paragraph 6;
+            Section 9.1, Paragraph 4; Section 9.2, Paragraph 11.4.1
+         WT_MAX_STREAM_DATA  Section 2, Paragraph 8; Section 3.4.3.1,
+            Paragraph 2.2.1; Section 3.4.4, Paragraph 1; Section 5.6,
+            Paragraph 1; Section 5.6, Paragraph 3; Section 5.6,
+            Paragraph 6; Section 9.1, Paragraph 7; Section 9.1,
+            Paragraph 10; Section 9.2, Paragraph 13.4.1
          WT_MAX_STREAMS  Section 2, Paragraph 8; Section 3.4.2,
-            Paragraph 1; Section 3.4.3, Paragraph 1; Section 5.7,
-            Paragraph 1; Section 5.7, Paragraph 1; Section 5.7,
-            Paragraph 1; Section 5.7, Paragraph 3; Section 5.7,
-            Paragraph 7; Section 5.7, Paragraph 7; Section 10.2,
-            Paragraph 15.4.1
+            Paragraph 1; Section 3.4.3.1, Paragraph 2.3.1;
+            Section 3.4.4, Paragraph 1; Section 5.7, Paragraph 1;
+            Section 5.7, Paragraph 2; Section 5.7, Paragraph 4;
+            Section 5.7, Paragraph 8; Section 9.1, Paragraph 13;
+            Section 9.1, Paragraph 16; Section 9.2, Paragraph 15.4.1
          WT_RESET_STREAM  Section 2, Paragraph 9; Section 5.2, Paragraph
-            1; Section 5.2, Paragraph 2; Section 5.2, Paragraph 2;
-            Section 5.2, Paragraph 4; Section 10.2, Paragraph 5.4.1
+            1; Section 5.2, Paragraph 2; Section 5.2, Paragraph 3;
+            Section 5.2, Paragraph 5; Section 9.2, Paragraph 5.4.1
          WT_STOP_SENDING  Section 2, Paragraph 9; Section 5.3, Paragraph
-            1; Section 5.3, Paragraph 1; Section 5.3, Paragraph 3;
-            Section 10.2, Paragraph 7.4.1
-         WT_STREAM  Section 2, Paragraph 7, Item 1; Section 4.1,
-            Paragraph 2; Section 5.2, Paragraph 2; Section 5.2,
-            Paragraph 6; Section 5.4, Paragraph 1; Section 5.4,
-            Paragraph 2; Section 5.4, Paragraph 4; Section 5.4,
-            Paragraph 5.4.1; Section 5.4, Paragraph 5.4.1; Section 5.5,
-            Paragraph 5; Section 5.5, Paragraph 5; Section 5.6,
-            Paragraph 5; Section 5.6, Paragraph 5; Section 6, Paragraph
-            3; Section 10.2, Paragraph 9.4.1
-         WT_STREAM_DATA_BLOCKED  Section 2, Paragraph 8; Section 3.4.3,
+            1; Section 5.3, Paragraph 3; Section 9.2, Paragraph 7.4.1
+         WT_STREAM  Section 2, Paragraph 7.1.1; Section 4.1, Paragraph
+            2; Section 5.2, Paragraph 2; Section 5.2, Paragraph 3;
+            Section 5.2, Paragraph 7; Section 5.4, Paragraph 1;
+            Section 5.4, Paragraph 2; Section 5.4, Paragraph 4;
+            Section 5.4, Paragraph 5.4.1; Section 5.5, Paragraph 5;
+            Section 5.6, Paragraph 5; Section 6, Paragraph 3;
+            Section 9.2, Paragraph 9.4.1
+         WT_STREAM_DATA_BLOCKED  Section 2, Paragraph 8; Section 3.4.4,
             Paragraph 1; Section 5.9, Paragraph 1; Section 5.9,
-            Paragraph 3; Section 5.9, Paragraph 5; Section 5.9,
-            Paragraph 5; Section 10.2, Paragraph 19.4.1
-         WT_STREAMS_BLOCKED  Section 2, Paragraph 8; Section 3.4.3,
+            Paragraph 3; Section 5.9, Paragraph 5; Section 9.2,
+            Paragraph 19.4.1
+         WT_STREAMS_BLOCKED  Section 2, Paragraph 8; Section 3.4.4,
             Paragraph 1; Section 5.10, Paragraph 1; Section 5.10,
-            Paragraph 1; Section 5.10, Paragraph 2; Section 5.10,
-            Paragraph 4; Section 5.10, Paragraph 6; Section 5.10,
-            Paragraph 6; Section 10.2, Paragraph 21.4.1
+            Paragraph 2; Section 5.10, Paragraph 4; Section 5.10,
+            Paragraph 6; Section 9.2, Paragraph 21.4.1
 
 Authors' Addresses
 
