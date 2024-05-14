@@ -2416,7 +2416,7 @@ as soon as possible.<a href="#section-6.13-4" class="pilcrow">¶</a></p>
 to tolerate capsules that arrive out of order. This differs from QUIC in that a
 receiver is required to treat the arrival of out of order frames rather than
 being tolerant.<a href="#section-6.14-1" class="pilcrow">¶</a></p>
-<p id="section-6.14-2">For an intermediary that forwards from an unreliable transport (like
+<p id="section-6.14-2">For an intermediary that forwards from an strongly-ordered transport (like
 <span>[<a href="#WEBTRANSPORT-H3" class="cite xref">WEBTRANSPORT-H3</a>]</span>) to a reliable transport (like this protocol), it is
 necessary to maintain state for streams. A simple forwarding intermediary that
 directly translates one type of protocol unit into another without understanding
