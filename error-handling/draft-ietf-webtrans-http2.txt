@@ -296,8 +296,8 @@ Table of Contents
    WEBTRANSPORT_ERROR (0xTBD):  This generic error can be used for
       errors that do not have more specific error codes.
 
-   WEBTRANSPORT_STREAM (0xTBD):  A stream-related capsule identified a
-      stream that was in an invalid state.
+   WEBTRANSPORT_STREAM_STATE_ERROR (0xTBD):  A stream-related capsule
+      identified a stream that was in an invalid state.
 
    Prior terminating a stream with an error, a
    CLOSE_WEBTRANSPORT_SESSION capsule with an application-specified
@@ -616,8 +616,8 @@ Table of Contents
    A WT_RESET_STREAM capsule MUST NOT be sent after a stream is closed
    or reset.  While QUIC permits redundant RESET_STREAM frames, the
    ordering guarantee in HTTP/2 makes this unnecessary.  A stream error
-   (Section 3.4) of type WEBTRANSPORT_STREAM MUST be sent if a
-   WT_RESET_STREAM capsule is received for a stream that is not in a
+   (Section 3.4) of type WEBTRANSPORT_STREAM_STATE_ERROR MUST be sent if
+   a WT_RESET_STREAM capsule is received for a stream that is not in a
    valid state.
 
 6.3.  WT_STOP_SENDING Capsule
@@ -648,8 +648,8 @@ Table of Contents
    A WT_STOP_SENDING capsule MUST NOT be sent multiple times for the
    same stream.  While QUIC permits redundant STOP_SENDING frames, the
    ordering guarantee in HTTP/2 makes this unnecessary.  A stream error
-   (Section 3.4) of type WEBTRANSPORT_STREAM MUST be sent if a second
-   WT_STOP_SENDING capsule is received.
+   (Section 3.4) of type WEBTRANSPORT_STREAM_STATE_ERROR MUST be sent if
+   a second WT_STOP_SENDING capsule is received.
 
 6.4.  WT_STREAM Capsule
 
@@ -683,8 +683,9 @@ Table of Contents
    A WT_STREAM capsule MUST NOT be sent after a stream is closed or
    reset.  While QUIC permits redundant STREAM frames, the ordering
    guarantee in HTTP/2 makes this unnecessary.  A stream error
-   (Section 3.4) of type WEBTRANSPORT_STREAM MUST be sent if a WT_STREAM
-   capsule is received for a stream that is not in a valid state.
+   (Section 3.4) of type WEBTRANSPORT_STREAM_STATE_ERROR MUST be sent if
+   a WT_STREAM capsule is received for a stream that is not in a valid
+   state.
 
 6.5.  WT_MAX_DATA Capsule
 
@@ -763,8 +764,9 @@ Table of Contents
    that a stream be closed with WT_STOP_SENDING.  While QUIC permits
    redundant MAX_STREAM_DATA frames, the ordering guarantee in HTTP/2
    makes this unnecessary.  A stream error (Section 3.4) of type
-   WEBTRANSPORT_STREAM MUST be sent if a WT_MAX_STREAM_DATA capsule is
-   received after a WT_STOP_SENDING capsule for the same stream.
+   WEBTRANSPORT_STREAM_STATE_ERROR MUST be sent if a WT_MAX_STREAM_DATA
+   capsule is received after a WT_STOP_SENDING capsule for the same
+   stream.
 
 6.7.  WT_MAX_STREAMS Capsule
 
@@ -870,9 +872,9 @@ Table of Contents
    A WT_STREAM_DATA_BLOCKED capsule MUST NOT be sent after a stream is
    closed or reset.  While QUIC permits redundant STREAM_DATA_BLOCKED
    frames, the ordering guarantee in HTTP/2 makes this unnecessary.  A
-   stream error (Section 3.4) of type WEBTRANSPORT_STREAM MUST be sent
-   if a WT_STREAM_DATA_BLOCKED capsule is received for a stream that is
-   not in a valid state.
+   stream error (Section 3.4) of type WEBTRANSPORT_STREAM_STATE_ERROR
+   MUST be sent if a WT_STREAM_DATA_BLOCKED capsule is received for a
+   stream that is not in a valid state.
 
 6.10.  WT_STREAMS_BLOCKED Capsule
 
@@ -1276,11 +1278,11 @@ WebTransport Data
 
    Reference:  Section 3.4
 
-   For WEBTRANSPORT_STREAM:
+   For WEBTRANSPORT_STREAM_STATE_ERROR:
 
    Code:  0xTBD
 
-   Name:  WEBTRANSPORT_STREAM
+   Name:  WEBTRANSPORT_STREAM_STATE_ERROR
 
    Description:  Unexpected WebTransport stream-related capsule received
 
