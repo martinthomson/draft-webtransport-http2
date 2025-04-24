@@ -5,7 +5,7 @@
 webtrans                                                     A. Frindell
 Internet-Draft                                             Facebook Inc.
 Intended status: Standards Track                              E. Kinnear
-Expires: 25 October 2025                                        T. Pauly
+Expires: 26 October 2025                                        T. Pauly
                                                               Apple Inc.
                                                               M. Thomson
                                                                  Mozilla
@@ -13,7 +13,7 @@ Expires: 25 October 2025                                        T. Pauly
                                                                   Google
                                                                   G. Xie
                                                            Facebook Inc.
-                                                           23 April 2025
+                                                           24 April 2025
 
 
                         WebTransport over HTTP/2
@@ -54,7 +54,7 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 25 October 2025.
+   This Internet-Draft will expire on 26 October 2025.
 
 Copyright Notice
 
@@ -1095,6 +1095,12 @@ Table of Contents
    estimates of the path MTU that might be used for forwarding change or
    in reaction to requests that change where datagrams might be
    forwarded.
+
+   An endpoint MUST NOT send a DATAGRAM capsule that exceeds the value
+   of SETTINGS_MAX_DATAGRAM_SIZE after acknowledging the setting.  An
+   endpoint that receives a DATAGRAM capsule that exceeds this limit
+   MUST drop the capsule and MAY choose to close the connection with a
+   PROTOCOL_ERROR; see Section 7 of [HTTP2].
 
 7.  Examples
 
